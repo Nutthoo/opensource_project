@@ -1,3 +1,4 @@
+```mermaid
 flowchart TD
     subgraph Client ["프론트엔드 (사용자 웹 UI)"]
         UI["Vue 3 Dashboard<br/>(반응형 모니터링 화면)"]
@@ -10,7 +11,7 @@ flowchart TD
     end
 
     subgraph Native Engine ["네이티브 모니터링 엔진"]
-        NAPI["N-API / Node-addon-api<br/>(C++ C++ Binding)"]
+        NAPI["N-API / Node-addon-api<br/>(C++ Binding)"]
         Engine["C++ Async Monitoring Core<br/>(Boost.Asio 기반)"]
     end
 
@@ -24,9 +25,9 @@ flowchart TD
         Target3["TCP Port Check"]
     end
 
-    %% 연결 관계
     UI <-->|WebSocket / HTTP| Server
     Server <--> Socket
     Server <--> DB_Adapter <--> DB
     Server <-->|Native Call| NAPI <--> Engine
     Engine -->|비동기 프로토콜 감지| Target1 & Target2 & Target3
+```
