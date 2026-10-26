@@ -1,0 +1,126 @@
+// Ported from Uptime Kuma src/assets/app.scss (MIT, Copyright (c) 2021 Louis Lam)
+// 대시보드/카드/상태바에 필요한 부분만 골라서 가져왔습니다.
+
+@import "vars.scss";
+
+// Bootstrap 색상을 Uptime Kuma 색상으로 덮어쓰기 ($primary 등이 vars.scss 에 정의됨)
+@import "bootstrap/scss/bootstrap";
+
+#app {
+    font-family:
+        BlinkMacSystemFont,
+        "segoe ui",
+        Roboto,
+        "Apple SD Gothic Neo",
+        "Noto Sans KR",
+        Arial,
+        sans-serif;
+}
+
+body {
+    background-color: #fafafa;
+}
+
+h1 {
+    font-size: 32px;
+}
+
+h2 {
+    font-size: 26px;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 20px;
+}
+
+.bg-maintenance {
+    color: white !important;
+    background-color: $maintenance !important;
+}
+
+.text-maintenance {
+    color: $maintenance !important;
+}
+
+// ── Uptime Kuma 의 핵심 카드 스타일 ──
+.shadow-box {
+    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
+    padding: 10px;
+    border-radius: 10px;
+    background-color: white;
+
+    &.big-padding {
+        padding: 20px;
+    }
+}
+
+.btn {
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.btn-sm {
+    border-radius: 25px;
+}
+
+.btn-primary {
+    color: white;
+
+    &:hover,
+    &:active,
+    &:focus,
+    &.active {
+        color: white;
+        background-color: $highlight;
+        border-color: $highlight;
+    }
+}
+
+.badge {
+    min-width: 62px;
+}
+
+// 모니터(사이트) 목록 한 줄
+.monitor-list {
+    .item {
+        display: block;
+        text-decoration: none;
+        color: $link-color;
+        padding: 13px 15px 10px 15px;
+        border-radius: 10px;
+        transition: all ease-in-out 0.15s;
+
+        &.disabled {
+            opacity: 0.3;
+        }
+
+        &:hover {
+            background-color: $highlight-white;
+        }
+    }
+}
+
+.modal-content {
+    border-radius: 1rem;
+    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.1);
+}
+
+// 페이지 전환 애니메이션 (Uptime Kuma 와 동일)
+.slide-fade-enter-active {
+    transition: all 0.2s $easing-out;
+}
+
+.slide-fade-leave-active {
+    transition: all 0.2s $easing-in;
+}
+
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+    transform: translateY(50px);
+    opacity: 0;
+}
