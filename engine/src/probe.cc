@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "net_compat.h"
+#include "tls_client.h"
 
 namespace engine {
 
@@ -31,13 +32,35 @@ timeval toTimeval(int ms) {
     return tv;
 }
 
-// proj1 util.recv_select 와 같은 역할: 읽을 패킷이 올 때까지 최대 ms 만큼 기다림
-bool waitReadable(socket_t s, int ms) {
-    fd_set rset;
-    FD_ZERO(&rset);
-    FD_SET(s, &rset);
-    timeval tv = toTimeval(ms);
-    return select(static_cast<int>(s) + 1, &rset, nullptr, nullptr, &tv) > 0;
+bool waitReadable(socket_t s, int ms) { return waitReady(s, false, ms); }
+
+// TlsSession::send/recv 와 같은 규칙: >0 byte 수, 0 연결 종료, -1 에러, -2 타임아웃
+int plainSend(socket_t s, const char* data, size_t len, Clock::time_point deadline) {
+    size_t sent = 0;
+    while (sent < len) {
+        int n = send(s, data + sent, static_cast<int>(len - sent), 0);
+        if (n > 0) {
+            sent += n;
+            continue;
+        }
+        if (n < 0 && isInProgress(lastError())) {
+            int left = remainingMs(deadline);
+            if (left > 0 && waitReady(s, true, left)) continue;
+            return -2;
+        }
+        return -1;
+    }
+    return static_cast<int>(sent);
+}
+
+int plainRecv(socket_t s, char* buf, size_t len, Clock::time_point deadline) {
+    while (true) {
+        int left = remainingMs(deadline);
+        if (left <= 0 || !waitReadable(s, left)) return -2;
+        int n = recv(s, buf, static_cast<int>(len), 0);
+        if (n >= 0) return n;
+        if (!isInProgress(lastError())) return -1;
+    }
 }
 
 // non-blocking connect 의 완료(= handshake 끝) 를 기다림
@@ -270,7 +293,7 @@ ProbeResult checkTcp(const std::string& host, int port, int timeoutMs) {
     return r;
 }
 
-ProbeResult checkHttp(const std::string& url, int timeoutMs) {
+ProbeResult checkHttp(const std::string& url, int timeoutMs, bool ignoreTls) {
     ProbeResult r;
     r.method = "http";
     auto t0 = Clock::now();
@@ -292,43 +315,37 @@ ProbeResult checkHttp(const std::string& url, int timeoutMs) {
         return r;
     }
 
+    // HTTPS: TCP handshake 다음에 TLS handshake 를 하고, 그 위로 같은 HTTP 요청을 보낸다
+    std::unique_ptr<TlsSession> tls;
     if (u.scheme == "https") {
-        // HTTPS 는 handshake 다음에 TLS 가 필요해서 평문 HTTP 요청을 보낼 수 없음.
-        // TCP 443 handshake 성공 = 서버가 응답하는 상태로 판단.
-        r.up = true;
-        r.method = "tcp";
-        r.message = "HTTPS: TCP 443 handshake 로 판정 (TLS 미지원, status code 없음)";
+        r.method = "https";
+        tls = TlsSession::connect(s, u.host, deadline, ignoreTls, r);
+        if (!tls) {
+            closeSocket(s);
+            r.totalMs = msSince(t0);
+            return r;
+        }
+    }
+    auto finish = [&] {
+        tls.reset();
         closeSocket(s);
         r.totalMs = msSince(t0);
-        return r;
-    }
+    };
 
     // Lec16: 사람이 읽을 수 있는 평문 요청. Host 헤더로 어떤 사이트인지 알려준다.
+    int defaultPort = u.scheme == "https" ? 443 : 80;
     std::string req = "GET " + u.path + " HTTP/1.1\r\n"
-                      "Host: " + u.host + (u.port != 80 ? ":" + std::to_string(u.port) : "") + "\r\n"
+                      "Host: " + u.host + (u.port != defaultPort ? ":" + std::to_string(u.port) : "") + "\r\n"
                       "User-Agent: opensource-project-engine/1.0\r\n"
                       "Accept: */*\r\n"
                       "Connection: close\r\n\r\n";
 
     auto tReq = Clock::now();
-    size_t sent = 0;
-    while (sent < req.size()) {
-        int n = send(s, req.data() + sent, static_cast<int>(req.size() - sent), 0);
-        if (n > 0) {
-            sent += n;
-            continue;
-        }
-        if (n < 0 && isInProgress(lastError()) && remainingMs(deadline) > 0) {
-            fd_set wset;
-            FD_ZERO(&wset);
-            FD_SET(s, &wset);
-            timeval tv = toTimeval(remainingMs(deadline));
-            select(static_cast<int>(s) + 1, nullptr, &wset, nullptr, &tv);
-            continue;
-        }
-        r.message = "요청 전송 실패";
-        closeSocket(s);
-        r.totalMs = msSince(t0);
+    int sent = tls ? tls->send(req.data(), req.size(), deadline) : plainSend(s, req.data(), req.size(), deadline);
+    if (sent != static_cast<int>(req.size())) {
+        r.timedOut = sent == -2;
+        r.message = r.timedOut ? "요청 전송 타임아웃" : "요청 전송 실패";
+        finish();
         return r;
     }
 
@@ -336,23 +353,16 @@ ProbeResult checkHttp(const std::string& url, int timeoutMs) {
     std::string head;
     char buf[2048];
     while (head.find("\r\n\r\n") == std::string::npos && head.size() < 16384) {
-        int left = remainingMs(deadline);
-        if (left <= 0 || !waitReadable(s, left)) {
-            r.timedOut = true;
-            break;
-        }
-        int n = recv(s, buf, sizeof(buf), 0);
+        int n = tls ? tls->recv(buf, sizeof(buf), deadline) : plainRecv(s, buf, sizeof(buf), deadline);
         if (n > 0) {
             if (head.empty()) r.ttfbMs = msSince(tReq);
             head.append(buf, n);
-        } else if (n == 0) {
-            break;  // 서버가 연결을 닫음 (FIN)
-        } else if (!isInProgress(lastError())) {
-            break;
+            continue;
         }
+        r.timedOut = n == -2;
+        break;  // 0: 서버가 연결을 닫음 (FIN), -1: 에러
     }
-    closeSocket(s);
-    r.totalMs = msSince(t0);
+    finish();
 
     if (head.empty()) {
         r.message = r.timedOut ? "응답 타임아웃 (status line 없음)" : "응답 없이 연결 종료";
@@ -366,6 +376,7 @@ ProbeResult checkHttp(const std::string& url, int timeoutMs) {
     // 200s 성공, 300s 리다이렉트(서버는 정상 응답 중) -> UP. 400s/500s -> DOWN.
     r.up = r.statusCode >= 200 && r.statusCode < 400;
     r.message = std::to_string(r.statusCode) + (r.statusText.empty() ? "" : " " + r.statusText);
+    if (r.method == "https" && !r.certValid) r.message += " (인증서 오류 무시: " + r.certError + ")";
     return r;
 }
 
@@ -488,7 +499,7 @@ ProbeResult ping(const std::string& host, int timeoutMs) {
 ProbeResult check(const Target& t) {
     if (t.type == "tcp") return checkTcp(t.host, t.port, t.timeoutMs);
     if (t.type == "ping") return ping(t.host, t.timeoutMs);
-    return checkHttp(t.url, t.timeoutMs);
+    return checkHttp(t.url, t.timeoutMs, t.ignoreTls);
 }
 
 std::vector<ProbeResult> checkMany(const std::vector<Target>& targets, int maxConcurrency) {

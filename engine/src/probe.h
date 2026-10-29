@@ -13,10 +13,11 @@ namespace engine {
 
 struct ProbeResult {
     bool up = false;
-    std::string method;      // "http" | "tcp" | "icmp" | "tcp-fallback"
+    std::string method;      // "http" | "https" | "tcp" | "icmp" | "tcp-fallback"
     std::string ip;          // DNS 로 얻은 IPv4 주소
     double dnsMs = -1;       // 이름 해석 시간
     double connectMs = -1;   // TCP handshake 시간 (= 1 RTT 근사)
+    double tlsMs = -1;       // TLS handshake 시간 (HTTPS)
     double ttfbMs = -1;      // 요청 전송 ~ 응답 첫 바이트
     double rttMs = -1;       // ICMP echo 왕복 시간
     double totalMs = -1;     // 대시보드에 표시할 응답 시간
@@ -25,6 +26,13 @@ struct ProbeResult {
     std::string location;    // 3xx 응답의 Location 헤더
     bool timedOut = false;
     bool refused = false;    // SYN 에 RST 가 돌아옴 = 호스트는 살아있고 포트만 닫힘
+    // HTTPS 인증서 정보
+    std::string tlsVersion;      // "TLSv1.3" 등
+    bool hasCert = false;
+    bool certValid = false;
+    std::string certError;       // 검증 실패 이유
+    std::string certExpiresAt;   // ISO 8601 (UTC)
+    int certDaysLeft = 0;
     std::string message;
 };
 
@@ -34,6 +42,7 @@ struct Target {
     std::string host;           // type == tcp / ping
     int port = 0;               // type == tcp
     int timeoutMs = 10000;
+    bool ignoreTls = false;     // 인증서 오류가 있어도 응답만 오면 up 으로 판정
 };
 
 struct ParsedUrl {
@@ -47,7 +56,7 @@ ParsedUrl parseUrl(const std::string& url);
 // 필요한 경우만 따로 부를 수 있게 공개
 bool resolveIPv4(const std::string& host, std::string& ipOut, double& dnsMs, std::string& err);
 
-ProbeResult checkHttp(const std::string& url, int timeoutMs);
+ProbeResult checkHttp(const std::string& url, int timeoutMs, bool ignoreTls = false);
 ProbeResult checkTcp(const std::string& host, int port, int timeoutMs);
 ProbeResult ping(const std::string& host, int timeoutMs);
 ProbeResult check(const Target& t);

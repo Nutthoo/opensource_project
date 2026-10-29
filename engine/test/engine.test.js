@@ -153,10 +153,32 @@ if (process.env.ENGINE_ONLINE) {
     console.log(`      ${r.statusCode} dns=${r.dnsMs} connect=${r.connectMs} ttfb=${r.ttfbMs} total=${r.responseTime}`);
     assert.strictEqual(r.up, true);
   });
-  test('[online] https://github.com (TCP 443)', async () => {
-    const r = await engine.checkHttp('https://github.com', 5000);
-    console.log(`      method=${r.method} connect=${r.connectMs} ${r.message}`);
+  test('[online] HTTPS: TLS handshake + status code + 인증서', async () => {
+    const urls = ['https://github.com', 'https://www.naver.com', 'https://example.com'];
+    const out = await engine.checkMany(urls.map((url) => ({ type: 'http', url, timeoutMs: 8000 })));
+    out.forEach((r, i) => {
+      console.log(`      ${urls[i]} ${r.statusCode} ${r.tls.version} tls=${r.tlsMs}ms 인증서 ${r.tls.daysLeft}일 남음`);
+      assert.strictEqual(r.method, 'https');
+      assert.strictEqual(r.up, true, `${urls[i]}: ${r.message}`);
+      assert.strictEqual(r.tls.certValid, true);
+      assert.ok(r.tlsMs > 0 && r.statusCode >= 200);
+    });
+  });
+  test('[online] 잘못된 인증서 -> down (만료 / 호스트 불일치 / 자체 서명)', async () => {
+    const bad = ['https://expired.badssl.com/', 'https://wrong.host.badssl.com/', 'https://self-signed.badssl.com/'];
+    const out = await engine.checkMany(bad.map((url) => ({ type: 'http', url, timeoutMs: 20000 })));
+    out.forEach((r, i) => {
+      assert.strictEqual(r.up, false, bad[i]);
+      assert.strictEqual(r.tls.certValid, false);
+      assert.match(r.message, /인증서 검증 실패/);
+    });
+    assert.ok(out[0].tls.daysLeft < 0);
+  });
+  test('[online] ignoreTls: 인증서 오류여도 응답 오면 up', async () => {
+    const r = await engine.checkHttp('https://expired.badssl.com/', 20000, { ignoreTls: true });
     assert.strictEqual(r.up, true);
+    assert.strictEqual(r.statusCode, 200);
+    assert.match(r.message, /인증서 오류 무시/);
   });
   test('[online] 응답 없는 IP -> SYN 타임아웃', async () => {
     const r = await engine.checkTcp('10.255.255.1', 80, 800);

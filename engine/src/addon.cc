@@ -10,6 +10,7 @@
 
 #include "probe.h"
 #include "rtt_estimator.h"
+#include "tls_client.h"
 
 namespace {
 
@@ -30,6 +31,7 @@ Napi::Object toJs(Napi::Env env, const ProbeResult& r) {
     o.Set("responseTime", msOrNull(env, r.totalMs));
     o.Set("dnsMs", msOrNull(env, r.dnsMs));
     o.Set("connectMs", msOrNull(env, r.connectMs));
+    o.Set("tlsMs", msOrNull(env, r.tlsMs));
     o.Set("ttfbMs", msOrNull(env, r.ttfbMs));
     o.Set("rttMs", msOrNull(env, r.rttMs));
     o.Set("statusCode", r.statusCode ? Napi::Number::New(env, r.statusCode) : env.Null());
@@ -37,6 +39,17 @@ Napi::Object toJs(Napi::Env env, const ProbeResult& r) {
     o.Set("location", r.location.empty() ? env.Null() : Napi::String::New(env, r.location));
     o.Set("timedOut", r.timedOut);
     o.Set("refused", r.refused);
+    if (r.method == "https") {
+        Napi::Object tls = Napi::Object::New(env);
+        tls.Set("version", r.tlsVersion.empty() ? env.Null() : Napi::String::New(env, r.tlsVersion));
+        tls.Set("certValid", r.certValid);
+        tls.Set("certError", r.certError.empty() ? env.Null() : Napi::String::New(env, r.certError));
+        tls.Set("expiresAt", r.hasCert ? Napi::String::New(env, r.certExpiresAt) : env.Null());
+        tls.Set("daysLeft", r.hasCert ? Napi::Number::New(env, r.certDaysLeft) : env.Null());
+        o.Set("tls", tls);
+    } else {
+        o.Set("tls", env.Null());
+    }
     o.Set("message", r.message);
     return o;
 }
@@ -119,11 +132,18 @@ Napi::Value queue(Napi::Env env, Fn fn) {
     return p;
 }
 
-// checkHttp(url, timeoutMs?) -> Promise<Result>
+bool ignoreTlsOf(const Napi::Value& v) {
+    if (!v.IsObject()) return false;
+    Napi::Value f = v.As<Napi::Object>().Get("ignoreTls");
+    return f.IsBoolean() && f.As<Napi::Boolean>().Value();
+}
+
+// checkHttp(url, timeoutMs?, { ignoreTls }?) -> Promise<Result>
 Napi::Value CheckHttp(const Napi::CallbackInfo& info) {
     std::string url = stringArg(info, 0, "url");
     int timeout = timeoutArg(info, 1, 10000);
-    return queue(info.Env(), [url, timeout] { return engine::checkHttp(url, timeout); });
+    bool ignoreTls = info.Length() > 2 && ignoreTlsOf(info[2]);
+    return queue(info.Env(), [url, timeout, ignoreTls] { return engine::checkHttp(url, timeout, ignoreTls); });
 }
 
 // checkTcp(host, port, timeoutMs?) -> Promise<Result>
@@ -142,7 +162,7 @@ Napi::Value Ping(const Napi::CallbackInfo& info) {
     return queue(info.Env(), [host, timeout] { return engine::ping(host, timeout); });
 }
 
-// checkMany([{type, url, host, port, timeoutMs}], concurrency?) -> Promise<Result[]>
+// checkMany([{type, url, host, port, timeoutMs, ignoreTls}], concurrency?) -> Promise<Result[]>
 Napi::Value CheckMany(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     if (info.Length() < 1 || !info[0].IsArray()) throw Napi::TypeError::New(env, "targets 배열이 필요합니다");
@@ -159,6 +179,7 @@ Napi::Value CheckMany(const Napi::CallbackInfo& info) {
         if (o.Get("host").IsString()) t.host = o.Get("host").As<Napi::String>().Utf8Value();
         if (o.Get("port").IsNumber()) t.port = o.Get("port").As<Napi::Number>().Int32Value();
         if (o.Get("timeoutMs").IsNumber()) t.timeoutMs = o.Get("timeoutMs").As<Napi::Number>().Int32Value();
+        t.ignoreTls = ignoreTlsOf(o);
         targets.push_back(std::move(t));
     }
     int concurrency = timeoutArg(info, 1, 16);
@@ -226,7 +247,14 @@ private:
     engine::RttEstimator est_;
 };
 
+// setCaBundle(path): HTTPS 인증서 검증에 쓸 CA 목록 파일 (index.js 가 자동 호출)
+Napi::Value SetCaBundle(const Napi::CallbackInfo& info) {
+    engine::setCaBundlePath(stringArg(info, 0, "path"));
+    return info.Env().Undefined();
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    exports.Set("setCaBundle", Napi::Function::New(env, SetCaBundle));
     exports.Set("checkHttp", Napi::Function::New(env, CheckHttp));
     exports.Set("checkTcp", Napi::Function::New(env, CheckTcp));
     exports.Set("ping", Napi::Function::New(env, Ping));

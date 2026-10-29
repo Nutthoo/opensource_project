@@ -37,6 +37,9 @@ void netInit();
 void closeSocket(socket_t s);
 bool setNonBlocking(socket_t s);
 
+// select() 로 읽기/쓰기 가능해질 때까지 최대 ms 대기 (proj1 util.recv_select 와 같은 역할)
+bool waitReady(socket_t s, bool forWrite, int ms);
+
 // 마지막 소켓 에러 코드 (errno / WSAGetLastError)
 int lastError();
 bool isInProgress(int err);   // non-blocking connect 진행 중

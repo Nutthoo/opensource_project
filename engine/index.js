@@ -1,5 +1,9 @@
 // 모니터링 엔진 연결부: backend 에서 const engine = require('../engine');
+const path = require('path');
 const native = require('./build/Release/monitor_engine.node');
+
+// HTTPS 인증서 검증용 Mozilla CA 목록 (curl.se/ca/cacert.pem)
+native.setCaBundle(path.join(__dirname, 'deps', 'cacert', 'cacert.pem'));
 
 const DEFAULTS = {
   minTimeoutMs: 1000,
@@ -9,7 +13,7 @@ const DEFAULTS = {
 };
 
 // 사이트 정보 -> C++ Target
-// site: { id, url, type?: 'http'|'tcp'|'ping', host?, port? }
+// site: { id, url, type?: 'http'|'tcp'|'ping', host?, port?, ignoreTls? }
 function toTarget(site, timeoutMs) {
   const type = site.type === 'tcp' || site.type === 'ping' ? site.type : 'http';
   let host = site.host;
@@ -20,7 +24,14 @@ function toTarget(site, timeoutMs) {
       host = site.url;
     }
   }
-  return { type, url: site.url || '', host: host || '', port: Number(site.port) || 0, timeoutMs: Math.round(timeoutMs) };
+  return {
+    type,
+    url: site.url || '',
+    host: host || '',
+    port: Number(site.port) || 0,
+    timeoutMs: Math.round(timeoutMs),
+    ignoreTls: Boolean(site.ignoreTls),
+  };
 }
 
 // 응답을 받은 경우(성공, 4xx/5xx, RST)만 RTT 표본으로 쓴다. 타임아웃은 RTT 를 모르니 제외.

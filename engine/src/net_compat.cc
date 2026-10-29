@@ -33,6 +33,19 @@ bool setNonBlocking(socket_t s) {
 #endif
 }
 
+bool waitReady(socket_t s, bool forWrite, int ms) {
+    if (ms < 0) ms = 0;
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(s, &set);
+    timeval tv;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    int n = forWrite ? select(static_cast<int>(s) + 1, nullptr, &set, nullptr, &tv)
+                     : select(static_cast<int>(s) + 1, &set, nullptr, nullptr, &tv);
+    return n > 0;
+}
+
 int lastError() {
 #ifdef _WIN32
     return WSAGetLastError();
