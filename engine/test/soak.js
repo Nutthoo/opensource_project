@@ -18,14 +18,14 @@ const start = Date.now();
 let rounds = 0;
 let firstRss = 0;
 
-function report(results) {
+function report(results, roundMs) {
   const up = results.filter((r) => r.up).length;
   const mem = process.memoryUsage();
   const handles = process._getActiveHandles().length;
   if (!firstRss) firstRss = mem.rss;
   const avg = results.filter((r) => r.up).reduce((s, r) => s + r.responseTime, 0) / Math.max(up, 1);
   console.log(
-    `#${String(rounds).padStart(3)}  up ${up}/${results.length}  평균 ${avg.toFixed(0)}ms  ` +
+    `#${String(rounds).padStart(3)}  ${String(roundMs).padStart(5)}ms  up ${up}/${results.length}  평균 ${avg.toFixed(0)}ms  ` +
       `rss ${mb(mem.rss)}MB  heap ${mb(mem.heapUsed)}MB  handles ${handles}`,
   );
 }
@@ -36,7 +36,10 @@ function report(results) {
     const t0 = Date.now();
     const results = await monitor.checkAll(sites);
     rounds++;
-    report(results);
+    report(results, Date.now() - t0);
+    for (const r of results.filter((x) => Date.now() - t0 > intervalSec * 1000 && !x.up)) {
+      console.log(`      느린 라운드: site ${r.siteId} ${r.message}`);
+    }
     await new Promise((r) => setTimeout(r, Math.max(0, intervalSec * 1000 - (Date.now() - t0))));
   }
   const last = process.memoryUsage().rss;

@@ -54,7 +54,8 @@ struct ParsedUrl {
 ParsedUrl parseUrl(const std::string& url);
 
 // 필요한 경우만 따로 부를 수 있게 공개
-bool resolveIPv4(const std::string& host, std::string& ipOut, double& dnsMs, std::string& err);
+// 성공하면 r.ip, r.dnsMs 를 채움. 실패/타임아웃이면 r.message, r.timedOut 을 채우고 false
+bool resolveIPv4(const std::string& host, int timeoutMs, ProbeResult& r);
 
 ProbeResult checkHttp(const std::string& url, int timeoutMs, bool ignoreTls = false);
 ProbeResult checkTcp(const std::string& host, int port, int timeoutMs);

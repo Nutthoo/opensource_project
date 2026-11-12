@@ -79,7 +79,7 @@ monitor.start(
 
 | 기능 | 구현 | 근거 |
 |---|---|---|
-| DNS 시간 | `getaddrinfo` 시간 측정 | Lec15 DNS: 연결 전에 이름을 IP로 바꾸는 단계 |
+| DNS 시간 | `getaddrinfo` 시간 측정. `getaddrinfo`는 시간 제한이 없어서 별도 스레드에서 돌리고 timeout까지만 기다림(느린 DNS 하나가 전체 검사를 멈추지 않게) | Lec15 DNS: 연결 전에 이름을 IP로 바꾸는 단계 |
 | TCP 상태/속도 | non-blocking `connect` + `select`. 완료 시간 = SYN→SYN-ACK = 약 1 RTT. RST면 `refused` | 교과서 "TCP Handshake", Lec11 |
 | HTTP 상태 | `GET <path> HTTP/1.1` + `Host` 헤더를 평문으로 보내고 status line만 읽음. 판정은 아래 표 | Lec16 HTTP 요청/응답, Status Codes, Headers |
 | HTTPS | TCP handshake 뒤에 TLS handshake(SNI, 인증서 체인·이름·만료 검증)를 하고 그 위로 같은 HTTP 요청. 인증서가 잘못되면 down | Lec18 TLS (TCP 위의 보안 계층, 인증서로 서버 신원 확인) |

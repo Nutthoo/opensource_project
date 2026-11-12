@@ -4,7 +4,10 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <memory>
+#include <mutex>
 #include <thread>
 
 #include "net_compat.h"
@@ -253,25 +256,51 @@ ParsedUrl parseUrl(const std::string& url) {
     return u;
 }
 
-bool resolveIPv4(const std::string& host, std::string& ipOut, double& dnsMs, std::string& err) {
+bool resolveIPv4(const std::string& host, int timeoutMs, ProbeResult& r) {
     netInit();
-    addrinfo hints{};
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    addrinfo* res = nullptr;
+
+    // getaddrinfo 는 시간 제한을 걸 수 없어서, DNS 서버가 느리면 검사 전체가 timeout 을 넘겨 멈춘다.
+    // 그래서 별도 스레드에서 조회하고 timeout 까지만 기다린다. 늦게 끝난 조회는 결과만 버린다.
+    struct Job {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        bool ok = false;
+        std::string ip;
+    };
+    auto job = std::make_shared<Job>();
+    std::thread([job, host] {
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* res = nullptr;
+        bool ok = getaddrinfo(host.c_str(), nullptr, &hints, &res) == 0 && res;
+        char buf[INET_ADDRSTRLEN] = {0};
+        if (ok) {
+            inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(res->ai_addr)->sin_addr, buf, sizeof(buf));
+            freeaddrinfo(res);
+        }
+        std::lock_guard<std::mutex> lk(job->m);
+        job->ok = ok;
+        job->ip = buf;
+        job->done = true;
+        job->cv.notify_all();
+    }).detach();
 
     auto t0 = Clock::now();
-    int rc = getaddrinfo(host.c_str(), nullptr, &hints, &res);
-    dnsMs = msSince(t0);
-    if (rc != 0 || !res) {
-        err = "DNS 조회 실패: " + host;
+    std::unique_lock<std::mutex> lk(job->m);
+    bool finished = job->cv.wait_until(lk, t0 + std::chrono::milliseconds(timeoutMs), [&] { return job->done; });
+    r.dnsMs = msSince(t0);
+    if (!finished) {
+        r.timedOut = true;
+        r.message = "DNS 조회 타임아웃: " + host;
         return false;
     }
-    char buf[INET_ADDRSTRLEN] = {0};
-    auto* sin = reinterpret_cast<sockaddr_in*>(res->ai_addr);
-    inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf));
-    ipOut = buf;
-    freeaddrinfo(res);
+    if (!job->ok) {
+        r.message = "DNS 조회 실패: " + host;
+        return false;
+    }
+    r.ip = job->ip;
     return true;
 }
 
@@ -281,7 +310,10 @@ ProbeResult checkTcp(const std::string& host, int port, int timeoutMs) {
     auto t0 = Clock::now();
     auto deadline = t0 + std::chrono::milliseconds(timeoutMs);
 
-    if (!resolveIPv4(host, r.ip, r.dnsMs, r.message)) return r;
+    if (!resolveIPv4(host, timeoutMs, r)) {
+        r.totalMs = msSince(t0);
+        return r;
+    }
 
     socket_t s = kInvalidSocket;
     if (tcpHandshake(r.ip, port, deadline, s, r)) {
@@ -304,7 +336,7 @@ ProbeResult checkHttp(const std::string& url, int timeoutMs, bool ignoreTls) {
         r.message = "지원하지 않는 URL: " + url;
         return r;
     }
-    if (!resolveIPv4(u.host, r.ip, r.dnsMs, r.message)) {
+    if (!resolveIPv4(u.host, timeoutMs, r)) {
         r.totalMs = msSince(t0);
         return r;
     }
@@ -400,7 +432,10 @@ ProbeResult ping(const std::string& host, int timeoutMs) {
     auto t0 = Clock::now();
     auto deadline = t0 + std::chrono::milliseconds(timeoutMs);
 
-    if (!resolveIPv4(host, r.ip, r.dnsMs, r.message)) return r;
+    if (!resolveIPv4(host, timeoutMs, r)) {
+        r.totalMs = msSince(t0);
+        return r;
+    }
 
     // proj1 util.make_icmp 처럼 raw 소켓 먼저, 권한이 없으면 비특권 ICMP(DGRAM) 소켓 시도
     bool raw = true;

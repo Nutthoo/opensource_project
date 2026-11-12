@@ -189,6 +189,16 @@ if (process.env.ENGINE_ONLINE) {
     assert.strictEqual(r.statusCode, 200);
     assert.match(r.message, /인증서 오류 무시/);
   });
+  test('[online] DNS 조회도 timeout 안에서 끝남', async () => {
+    // 캐시에 없는 이름 + timeout 1ms: DNS 응답을 기다리지 않고 바로 타임아웃
+    const host = `x${Date.now()}${Math.random().toString(36).slice(2)}.example.com`;
+    const t0 = Date.now();
+    const r = await engine.checkHttp(`https://${host}/`, 1);
+    assert.ok(Date.now() - t0 < 500, `${Date.now() - t0}ms`);
+    assert.strictEqual(r.up, false);
+    assert.strictEqual(r.timedOut, true);
+    assert.match(r.message, /DNS 조회 타임아웃/);
+  });
   test('[online] 응답 없는 IP -> SYN 타임아웃', async () => {
     const r = await engine.checkTcp('10.255.255.1', 80, 800);
     assert.strictEqual(r.timedOut, true);
