@@ -2,7 +2,8 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 // database.sqlite / sites.db 생성 및 연결
-const db = new Database(path.join(__dirname, 'sites.db'));
+// DB_PATH: 테스트할 때 실제 sites.db 를 건드리지 않도록 다른 파일을 쓸 수 있게 함
+const db = new Database(process.env.DB_PATH || path.join(__dirname, 'sites.db'));
 
 // 성능 및 외래키 제약조건 설정
 db.pragma('journal_mode = WAL');
