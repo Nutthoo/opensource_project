@@ -39,6 +39,7 @@ await engine.checkTcp('db.example.com', 5432, 3000);
 await engine.ping('8.8.8.8', 2000);
 
 // 주기 모니터링 -> site_status 테이블에 기록
+// (실제 연동 코드는 backend/monitor.js. 아래는 간단한 예시)
 const monitor = new engine.Monitor({ maxTimeoutMs: 10000 });
 monitor.start(
   () => db.prepare('SELECT id, url FROM sites').all(),
