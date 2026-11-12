@@ -373,9 +373,15 @@ ProbeResult checkHttp(const std::string& url, int timeoutMs, bool ignoreTls) {
         return r;
     }
     r.timedOut = false;
-    // 200s 성공, 300s 리다이렉트(서버는 정상 응답 중) -> UP. 400s/500s -> DOWN.
-    r.up = r.statusCode >= 200 && r.statusCode < 400;
-    r.message = std::to_string(r.statusCode) + (r.statusText.empty() ? "" : " " + r.statusText);
+    // 200s 성공, 300s 리다이렉트 -> UP. 500s 서버 오류 -> DOWN.
+    // 400s 는 "요청(클라이언트) 쪽 문제" 라 서버 자체는 응답 중이다.
+    // 쿠팡, claude.ai 처럼 봇 차단으로 403 을 주는 사이트가 많아서 401/403/429 는 UP 으로 보고,
+    // 404/410 처럼 주소 자체가 없어진 경우만 DOWN 으로 본다.
+    int code = r.statusCode;
+    bool restricted = code == 401 || code == 403 || code == 429;
+    r.up = (code >= 200 && code < 400) || restricted;
+    r.message = std::to_string(code) + (r.statusText.empty() ? "" : " " + r.statusText);
+    if (restricted) r.message += " (접근 제한, 서버는 응답 중)";
     if (r.method == "https" && !r.certValid) r.message += " (인증서 오류 무시: " + r.certError + ")";
     return r;
 }

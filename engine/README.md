@@ -10,12 +10,15 @@
 cd engine
 npm install        # node-addon-api 설치 후 node-gyp rebuild 까지 자동 실행
 npm test           # 로컬 테스트 (ENGINE_ONLINE=1 이면 외부 사이트까지)
+node test/soak.js 5 5   # 장시간 테스트: 5분 동안 5초 간격으로 반복 검사
 ```
 
 - Node.js 20 LTS, C++17
 - Windows: Visual Studio "C++를 사용한 데스크톱 개발" 워크로드가 필요합니다. VS 2026(18)은 node-gyp 12 이상이어야 인식되므로 devDependency를 `node-gyp@^12`로 고정했습니다(node-gyp 13은 Node 22 이상 전용).
 - Linux/macOS: `g++`/`clang++`, `make`, `python3`
 - TLS 라이브러리(Mbed TLS)는 `deps/`에 소스로 들어 있어서 따로 설치할 것이 없습니다. 첫 빌드는 Mbed TLS까지 컴파일하느라 1~2분 걸립니다.
+- C++ 코드를 고친 뒤에는 `npx node-gyp build`로 다시 빌드합니다(바뀐 파일만 다시 컴파일). `npm install`만 다시 하면 처음부터 전부 빌드합니다.
+- `build/`는 PC마다 다르므로 커밋하지 않습니다(`.gitignore`에 있음). 저장소를 받은 사람은 각자 `npm install`을 한 번 해야 합니다.
 
 ## 사용법 (backend)
 
@@ -62,13 +65,23 @@ monitor.start(
 
 `Monitor` 결과에는 `siteId`, `attempts`, `timeoutMs`, `estimator`, `checkedAt`이 추가로 붙습니다.
 
+### up / down 판정 기준 (HTTP)
+
+| 응답 | 판정 | 이유 |
+|---|---|---|
+| 200번대, 300번대 | up | 성공 / 리다이렉트. 서버가 정상 응답 중 |
+| 401, 403, 429 | up (`message`에 "접근 제한") | 로그인 필요, 봇 차단, 요청 과다. 400번대는 요청 쪽 문제라 서버는 살아 있음. 쿠팡, claude.ai 등이 프로그램 요청에 403을 줌 |
+| 그 밖의 400번대 (404, 410 등) | down | 등록한 주소의 페이지가 없어짐 |
+| 500번대 | down | 서버 오류 |
+| 응답 없음, DNS 실패, 연결 거부, 인증서 오류 | down | `message`에 원인 |
+
 ## CS168 근거
 
 | 기능 | 구현 | 근거 |
 |---|---|---|
 | DNS 시간 | `getaddrinfo` 시간 측정 | Lec15 DNS: 연결 전에 이름을 IP로 바꾸는 단계 |
 | TCP 상태/속도 | non-blocking `connect` + `select`. 완료 시간 = SYN→SYN-ACK = 약 1 RTT. RST면 `refused` | 교과서 "TCP Handshake", Lec11 |
-| HTTP 상태 | `GET <path> HTTP/1.1` + `Host` 헤더를 평문으로 보내고 status line만 읽음. 200s/300s = up, 400s/500s = down | Lec16 HTTP 요청/응답, Status Codes, Headers |
+| HTTP 상태 | `GET <path> HTTP/1.1` + `Host` 헤더를 평문으로 보내고 status line만 읽음. 판정은 아래 표 | Lec16 HTTP 요청/응답, Status Codes, Headers |
 | HTTPS | TCP handshake 뒤에 TLS handshake(SNI, 인증서 체인·이름·만료 검증)를 하고 그 위로 같은 HTTP 요청. 인증서가 잘못되면 down | Lec18 TLS (TCP 위의 보안 계층, 인증서로 서버 신원 확인) |
 | ICMP ping | Echo Request(type 8)를 만들고, 받은 패킷의 IP 헤더 IHL·protocol로 ICMP 헤더를 찾아 type 0 / 3 / 11 판별. raw 소켓이 실패하면 비특권 소켓, 그다음 TCP fallback | proj1 traceroute (IPv4/ICMP 헤더 파싱, `make_icmp`, `recv_select`), 교과서 IP Header Fields |
 | 타임아웃 추정 | `srtt`/`rttvar` EWMA, `timeout = srtt + 4·rttvar` (min/max clamp) | 교과서 "Reliably Delivering a Single Packet": 타이머는 RTT 기준, 이동 평균 + 분산, 짧으면 오판이므로 길게. Lec12 "Detecting Loss" |

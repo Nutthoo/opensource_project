@@ -12,6 +12,8 @@ function startServer() {
     if (req.url === '/ok') return res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok');
     if (req.url === '/moved') return res.writeHead(301, { Location: '/ok' }).end();
     if (req.url === '/error') return res.writeHead(500).end();
+    if (req.url === '/forbidden') return res.writeHead(403).end();
+    if (req.url === '/busy') return res.writeHead(429).end();
     if (req.url.startsWith('/slow')) {
       const ms = Number(new URL(req.url, 'http://x').searchParams.get('ms')) || 500;
       return setTimeout(() => res.writeHead(200).end('slow'), ms);
@@ -53,6 +55,13 @@ test('HTTP 404 / 500 -> down', async () => {
   const a = await engine.checkHttp(`${base}/nope`, 3000);
   const b = await engine.checkHttp(`${base}/error`, 3000);
   assert.deepStrictEqual([a.statusCode, a.up, b.statusCode, b.up], [404, false, 500, false]);
+});
+
+test('HTTP 403 / 429 -> up (봇 차단/요청 과다여도 서버는 응답 중)', async () => {
+  const a = await engine.checkHttp(`${base}/forbidden`, 3000);
+  const b = await engine.checkHttp(`${base}/busy`, 3000);
+  assert.deepStrictEqual([a.statusCode, a.up, b.statusCode, b.up], [403, true, 429, true]);
+  assert.match(a.message, /접근 제한/);
 });
 
 test('응답 지연 > timeout -> timedOut, down', async () => {

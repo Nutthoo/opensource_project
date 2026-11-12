@@ -44,10 +44,16 @@
         "CLANG_CXX_LANGUAGE_STANDARD": "c++17",
         "MACOSX_DEPLOYMENT_TARGET": "10.15"
       },
+      # 링크 시간 최적화(LTCG)를 끔: VS 2026 에서 파일 하나만 고치고 다시 빌드하면
+      # "LNK1103 디버깅 정보가 손상되었습니다" 로 실패하는 문제가 있음
       "msvs_settings": {
         "VCCLCompilerTool": {
           "ExceptionHandling": 1,
+          "WholeProgramOptimization": "false",
           "AdditionalOptions": ["/std:c++17", "/utf-8"]
+        },
+        "VCLinkerTool": {
+          "LinkTimeCodeGeneration": 0
         }
       },
       "conditions": [
