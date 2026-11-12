@@ -1,2 +1,5 @@
 node_modules/
 *.db
+# SQLite WAL 모드가 만드는 임시 파일 (sites.db 와 같이 PC 마다 다름)
+*.db-shm
+*.db-wal

@@ -1,8 +1,9 @@
 const express = require('express');
-const { getAllSites, addSite, updateSite, deleteSite } = require('./db');
+const { getAllSites, addSite, updateSite, deleteSite, getRecentStatus } = require('./db');
+const monitor = require('./monitor');
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
@@ -24,7 +25,9 @@ app.post('/sites', (req, res) => {
   }
   try {
     const result = addSite(name, url);
-    res.status(201).json({ id: result.lastInsertRowid, name, url });
+    const id = Number(result.lastInsertRowid);
+    res.status(201).json({ id, name, url });
+    monitor.checkNow({ id, url });
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(409).json({ error: '이미 등록된 URL입니다' });
@@ -44,7 +47,11 @@ app.put('/sites/:id', (req, res) => {
     if (result.changes === 0) {
       return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
     }
-    res.json({ id: Number(req.params.id), name, url });
+    const id = Number(req.params.id);
+    res.json({ id, name, url });
+    // 주소가 바뀌었을 수 있으니 이전 응답 시간 추정값은 버리고 바로 다시 검사
+    monitor.forget(id);
+    monitor.checkNow({ id, url });
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(409).json({ error: '이미 등록된 URL입니다' });
@@ -59,9 +66,19 @@ app.delete('/sites/:id', (req, res) => {
   if (result.changes === 0) {
     return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
   }
+  monitor.forget(req.params.id);
   res.status(204).end();
+});
+
+// 5. 서버 상태 기록 (C++ 엔진이 저장한 site_status)
+// 응답: { "1": [{ site_id, status, response_time, message, checked_at }, ...], ... }
+// 사이트마다 최근 limit 개, 오래된 것부터. 프론트 adapter.js 의 toHeartbeatMap() 형식
+app.get('/heartbeats', (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 1000);
+  res.json(getRecentStatus(limit));
 });
 
 app.listen(PORT, () => {
   console.log(`서버 실행 중: http://localhost:${PORT}`);
+  monitor.start();
 });
