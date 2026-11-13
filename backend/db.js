@@ -80,6 +80,14 @@ const visitSiteStmt = db.prepare(`
   SET visit_count = visit_count + 1, last_visited_at = datetime('now')
   WHERE id = ?
 `);
+const getStaleSitesStmt = db.prepare(`
+  SELECT s.*,
+    (SELECT AVG(st.status = 'up') FROM site_status st
+      WHERE st.site_id = s.id AND st.checked_at >= datetime('now', '-1 day')) AS uptime_24
+  FROM sites s
+  WHERE COALESCE(s.last_visited_at, s.created_at) < datetime('now', ?)
+  ORDER BY COALESCE(s.last_visited_at, s.created_at)
+`);
 
 const insertStatusStmt = db.prepare(`
   INSERT INTO site_status (site_id, status, response_time, message)
@@ -111,6 +119,7 @@ module.exports = {
   updateSite: (id, name, url, type = 'http', port = null) => updateSiteStmt.run(name, url, type, port, id),
   deleteSite: (id) => deleteSiteStmt.run(id),
   visitSite: (id) => visitSiteStmt.run(id),
+  getStaleSites: (days) => getStaleSitesStmt.all(`-${days} days`),
   insertStatus: (siteId, status, responseTime, message = null) =>
     insertStatusStmt.run(siteId, status, responseTime, message),
   // { [siteId]: [ {site_id, status, response_time, message, checked_at}, ... ] }
