@@ -21,7 +21,16 @@ db.exec(`
   )
 `);
 
-// 2. 서버 상태/응답속도 기록 테이블 
+// [DB 구조 변경] sites 테이블에 type(확인 방식: http/ping/tcp), port(TCP 포트 번호) 칸 추가 - backend(JeongSeungjin0), 2026-11-13
+const siteColumns = db.prepare('PRAGMA table_info(sites)').all().map((c) => c.name);
+if (!siteColumns.includes('type')) {
+  db.exec("ALTER TABLE sites ADD COLUMN type TEXT NOT NULL DEFAULT 'http'");
+}
+if (!siteColumns.includes('port')) {
+  db.exec('ALTER TABLE sites ADD COLUMN port INTEGER');
+}
+
+// 2. 서버 상태/응답속도 기록 테이블
 db.exec(`
   CREATE TABLE IF NOT EXISTS site_status (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,8 +72,8 @@ const getAllSitesStmt = db.prepare(`
   ORDER BY s.id DESC
 `);
 const getSiteByIdStmt = db.prepare('SELECT * FROM sites WHERE id = ?');
-const addSiteStmt = db.prepare('INSERT INTO sites (name, url) VALUES (?, ?)');
-const updateSiteStmt = db.prepare('UPDATE sites SET name = ?, url = ? WHERE id = ?');
+const addSiteStmt = db.prepare('INSERT INTO sites (name, url, type, port) VALUES (?, ?, ?, ?)');
+const updateSiteStmt = db.prepare('UPDATE sites SET name = ?, url = ?, type = ?, port = ? WHERE id = ?');
 const deleteSiteStmt = db.prepare('DELETE FROM sites WHERE id = ?');
 const visitSiteStmt = db.prepare(`
   UPDATE sites
@@ -98,8 +107,8 @@ module.exports = {
   db,
   getAllSites: () => getAllSitesStmt.all(),
   getSiteById: (id) => getSiteByIdStmt.get(id),
-  addSite: (name, url) => addSiteStmt.run(name, url),
-  updateSite: (id, name, url) => updateSiteStmt.run(name, url, id),
+  addSite: (name, url, type = 'http', port = null) => addSiteStmt.run(name, url, type, port),
+  updateSite: (id, name, url, type = 'http', port = null) => updateSiteStmt.run(name, url, type, port, id),
   deleteSite: (id) => deleteSiteStmt.run(id),
   visitSite: (id) => visitSiteStmt.run(id),
   insertStatus: (siteId, status, responseTime, message = null) =>
