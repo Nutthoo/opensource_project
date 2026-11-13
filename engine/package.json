@@ -1,0 +1,22 @@
+{
+  "name": "monitor-engine",
+  "version": "1.0.0",
+  "description": "C++ 서버 상태 감지 / 응답 속도 측정 엔진 (node-addon-api)",
+  "main": "index.js",
+  "gypfile": true,
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "test": "node test/engine.test.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.1.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^12.4.0"
+  }
+}
