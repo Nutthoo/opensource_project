@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAllSites, addSite, updateSite, deleteSite, getRecentStatus } = require('./db');
+const { getAllSites, getSiteById, addSite, updateSite, deleteSite, visitSite, getRecentStatus } = require('./db');
 const monitor = require('./monitor');
 
 const app = express();
@@ -68,6 +68,14 @@ app.delete('/sites/:id', (req, res) => {
   }
   monitor.forget(req.params.id);
   res.status(204).end();
+});
+
+app.post('/sites/:id/visit', (req, res) => {
+  const result = visitSite(req.params.id);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
+  }
+  res.json(getSiteById(req.params.id));
 });
 
 // 5. 서버 상태 기록 (C++ 엔진이 저장한 site_status)

@@ -66,6 +66,11 @@ const getSiteByIdStmt = db.prepare('SELECT * FROM sites WHERE id = ?');
 const addSiteStmt = db.prepare('INSERT INTO sites (name, url) VALUES (?, ?)');
 const updateSiteStmt = db.prepare('UPDATE sites SET name = ?, url = ? WHERE id = ?');
 const deleteSiteStmt = db.prepare('DELETE FROM sites WHERE id = ?');
+const visitSiteStmt = db.prepare(`
+  UPDATE sites
+  SET visit_count = visit_count + 1, last_visited_at = datetime('now')
+  WHERE id = ?
+`);
 
 const insertStatusStmt = db.prepare(`
   INSERT INTO site_status (site_id, status, response_time, message)
@@ -96,6 +101,7 @@ module.exports = {
   addSite: (name, url) => addSiteStmt.run(name, url),
   updateSite: (id, name, url) => updateSiteStmt.run(name, url, id),
   deleteSite: (id) => deleteSiteStmt.run(id),
+  visitSite: (id) => visitSiteStmt.run(id),
   insertStatus: (siteId, status, responseTime, message = null) =>
     insertStatusStmt.run(siteId, status, responseTime, message),
   // { [siteId]: [ {site_id, status, response_time, message, checked_at}, ... ] }
