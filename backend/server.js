@@ -1,6 +1,7 @@
 const express = require('express');
-const { getAllSites, getSiteById, addSite, updateSite, deleteSite, visitSite, getRecentStatus } = require('./db');
+const { getAllSites, getSiteById, addSite, updateSite, deleteSite, visitSite, getStaleSites, getRecentStatus } = require('./db');
 const monitor = require('./monitor');
+const cleanup = require('./cleanup');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -52,6 +53,14 @@ function readSiteFields(body, current = {}) {
 app.get('/sites', (req, res) => {
   const sites = getAllSites();
   res.json(sites);
+});
+
+app.get('/sites/unvisited', (req, res) => {
+  const days = req.query.days === undefined ? 30 : Number(req.query.days);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    return res.status(400).json({ error: 'days는 1~3650 사이의 정수여야 합니다' });
+  }
+  res.json(getStaleSites(days));
 });
 
 // 2. 사이트 추가
@@ -127,4 +136,5 @@ app.get('/heartbeats', (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중: http://localhost:${PORT}`);
   monitor.start();
+  cleanup.start();
 });
