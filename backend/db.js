@@ -62,16 +62,43 @@ db.exec(`
   )
 `);
 
+// [DB 구조 변경] site_sessions 테이블에 auto_login(자동 로그인 사용 여부 0/1), logged_in(현재 로그인 상태 0/1), logged_in_at(마지막 로그인 시각) 칸 추가 - backend(JeongSeungjin0), 2026-11-13
+const sessionColumns = db.prepare('PRAGMA table_info(site_sessions)').all().map((c) => c.name);
+if (!sessionColumns.includes('auto_login')) {
+  db.exec('ALTER TABLE site_sessions ADD COLUMN auto_login INTEGER NOT NULL DEFAULT 0');
+}
+if (!sessionColumns.includes('logged_in')) {
+  db.exec('ALTER TABLE site_sessions ADD COLUMN logged_in INTEGER NOT NULL DEFAULT 0');
+}
+if (!sessionColumns.includes('logged_in_at')) {
+  db.exec('ALTER TABLE site_sessions ADD COLUMN logged_in_at TEXT');
+}
+
 //쿼리 템플릿
+const LOGIN_COLUMNS = 'COALESCE(ss.auto_login, 0) AS auto_login, COALESCE(ss.logged_in, 0) AS logged_in';
+const LOGIN_JOIN = 'LEFT JOIN site_sessions ss ON ss.site_id = s.id';
+
+function withLogin(row) {
+  if (!row) return row;
+  const { auto_login, logged_in, ...site } = row;
+  return { ...site, autoLogin: { enabled: auto_login === 1, loggedIn: logged_in === 1 } };
+}
+
 // uptime_24: 최근 24시간 동안 up 이었던 비율 (0~1, 기록이 없으면 null)
 const getAllSitesStmt = db.prepare(`
-  SELECT s.*,
+  SELECT s.*, ${LOGIN_COLUMNS},
     (SELECT AVG(st.status = 'up') FROM site_status st
       WHERE st.site_id = s.id AND st.checked_at >= datetime('now', '-1 day')) AS uptime_24
   FROM sites s
+  ${LOGIN_JOIN}
   ORDER BY s.id DESC
 `);
-const getSiteByIdStmt = db.prepare('SELECT * FROM sites WHERE id = ?');
+const getSiteByIdStmt = db.prepare(`
+  SELECT s.*, ${LOGIN_COLUMNS}
+  FROM sites s
+  ${LOGIN_JOIN}
+  WHERE s.id = ?
+`);
 const addSiteStmt = db.prepare('INSERT INTO sites (name, url, type, port) VALUES (?, ?, ?, ?)');
 const updateSiteStmt = db.prepare('UPDATE sites SET name = ?, url = ?, type = ?, port = ? WHERE id = ?');
 const deleteSiteStmt = db.prepare('DELETE FROM sites WHERE id = ?');
@@ -81,13 +108,40 @@ const visitSiteStmt = db.prepare(`
   WHERE id = ?
 `);
 const getStaleSitesStmt = db.prepare(`
-  SELECT s.*,
+  SELECT s.*, ${LOGIN_COLUMNS},
     (SELECT AVG(st.status = 'up') FROM site_status st
       WHERE st.site_id = s.id AND st.checked_at >= datetime('now', '-1 day')) AS uptime_24
   FROM sites s
+  ${LOGIN_JOIN}
   WHERE COALESCE(s.last_visited_at, s.created_at) < datetime('now', ?)
   ORDER BY COALESCE(s.last_visited_at, s.created_at)
 `);
+const setAutoLoginStmt = db.prepare(`
+  INSERT INTO site_sessions (site_id, auto_login) VALUES (?, ?)
+  ON CONFLICT (site_id) DO UPDATE SET
+    auto_login = excluded.auto_login,
+    logged_in = CASE WHEN excluded.auto_login = 1 THEN site_sessions.logged_in ELSE 0 END
+`);
+const loginSiteStmt = db.prepare(`
+  UPDATE site_sessions SET logged_in = 1, logged_in_at = datetime('now')
+  WHERE site_id = ? AND auto_login = 1
+`);
+const logoutSiteStmt = db.prepare(`
+  UPDATE site_sessions SET logged_in = 0
+  WHERE site_id = ? AND auto_login = 1
+`);
+
+const addSiteTx = db.transaction((name, url, type, port, autoLogin) => {
+  const result = addSiteStmt.run(name, url, type, port);
+  if (autoLogin) setAutoLoginStmt.run(result.lastInsertRowid, 1);
+  return result;
+});
+const updateSiteTx = db.transaction((id, name, url, type, port, autoLogin) => {
+  const result = updateSiteStmt.run(name, url, type, port, id);
+  if (result.changes === 0) return result;
+  if (autoLogin !== undefined) setAutoLoginStmt.run(id, autoLogin ? 1 : 0);
+  return result;
+});
 
 const insertStatusStmt = db.prepare(`
   INSERT INTO site_status (site_id, status, response_time, message)
@@ -113,13 +167,18 @@ const pruneStatusStmt = db.prepare(`
 //라우터 및 C++ 엔진 모듈 호출용
 module.exports = {
   db,
-  getAllSites: () => getAllSitesStmt.all(),
-  getSiteById: (id) => getSiteByIdStmt.get(id),
-  addSite: (name, url, type = 'http', port = null) => addSiteStmt.run(name, url, type, port),
-  updateSite: (id, name, url, type = 'http', port = null) => updateSiteStmt.run(name, url, type, port, id),
+  getAllSites: () => getAllSitesStmt.all().map(withLogin),
+  getSiteById: (id) => withLogin(getSiteByIdStmt.get(id)),
+  addSite: (name, url, type = 'http', port = null, autoLogin = false) =>
+    addSiteTx(name, url, type, port, autoLogin),
+  updateSite: (id, name, url, type = 'http', port = null, autoLogin) =>
+    updateSiteTx(id, name, url, type, port, autoLogin),
   deleteSite: (id) => deleteSiteStmt.run(id),
   visitSite: (id) => visitSiteStmt.run(id),
-  getStaleSites: (days) => getStaleSitesStmt.all(`-${days} days`),
+  getStaleSites: (days) => getStaleSitesStmt.all(`-${days} days`).map(withLogin),
+  setAutoLogin: (siteId, enabled) => setAutoLoginStmt.run(siteId, enabled ? 1 : 0),
+  loginSite: (siteId) => loginSiteStmt.run(siteId),
+  logoutSite: (siteId) => logoutSiteStmt.run(siteId),
   insertStatus: (siteId, status, responseTime, message = null) =>
     insertStatusStmt.run(siteId, status, responseTime, message),
   // { [siteId]: [ {site_id, status, response_time, message, checked_at}, ... ] }
