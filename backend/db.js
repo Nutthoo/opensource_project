@@ -131,6 +131,18 @@ const logoutSiteStmt = db.prepare(`
   WHERE site_id = ? AND auto_login = 1
 `);
 
+const addSiteTx = db.transaction((name, url, type, port, autoLogin) => {
+  const result = addSiteStmt.run(name, url, type, port);
+  if (autoLogin) setAutoLoginStmt.run(result.lastInsertRowid, 1);
+  return result;
+});
+const updateSiteTx = db.transaction((id, name, url, type, port, autoLogin) => {
+  const result = updateSiteStmt.run(name, url, type, port, id);
+  if (result.changes === 0) return result;
+  if (autoLogin !== undefined) setAutoLoginStmt.run(id, autoLogin ? 1 : 0);
+  return result;
+});
+
 const insertStatusStmt = db.prepare(`
   INSERT INTO site_status (site_id, status, response_time, message)
   VALUES (?, ?, ?, ?)
@@ -157,8 +169,10 @@ module.exports = {
   db,
   getAllSites: () => getAllSitesStmt.all().map(withLogin),
   getSiteById: (id) => withLogin(getSiteByIdStmt.get(id)),
-  addSite: (name, url, type = 'http', port = null) => addSiteStmt.run(name, url, type, port),
-  updateSite: (id, name, url, type = 'http', port = null) => updateSiteStmt.run(name, url, type, port, id),
+  addSite: (name, url, type = 'http', port = null, autoLogin = false) =>
+    addSiteTx(name, url, type, port, autoLogin),
+  updateSite: (id, name, url, type = 'http', port = null, autoLogin) =>
+    updateSiteTx(id, name, url, type, port, autoLogin),
   deleteSite: (id) => deleteSiteStmt.run(id),
   visitSite: (id) => visitSiteStmt.run(id),
   getStaleSites: (days) => getStaleSitesStmt.all(`-${days} days`).map(withLogin),

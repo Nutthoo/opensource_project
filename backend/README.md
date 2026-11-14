@@ -44,6 +44,11 @@ npm test             # 엔진 연동 테스트 (임시 DB 사용, 실제 sites.d
 | POST | `/sites/:id/logout` | 원격 로그아웃(데모): 로그인 상태를 `false`로 바꿈. 응답과 오류 규칙은 login과 같음 |
 | GET | `/heartbeats?limit=100` | 사이트별 최근 상태 기록 (아래) |
 
+`name`, `url` 규칙 (추가/수정 공통, 어기면 400):
+
+- 둘 다 문자열이어야 하고, 앞뒤 공백은 지우고 저장함. `name`은 100자, `url`은 2048자 이하
+- 주소로 읽을 수 있어야 함. `type`이 `http`면 `http://` 또는 `https://`로 시작해야 하고, `ping`/`tcp`는 `example.com`처럼 스킴 없이도 됨
+
 `type`, `port` 규칙:
 
 - `type`: `http`(기본값) / `ping` / `tcp`. 프론트 사이트 추가 창이 보내는 `port`는 `tcp`로 바꿔서 저장함. 그 외 값은 400
@@ -54,6 +59,19 @@ npm test             # 엔진 연동 테스트 (임시 DB 사용, 실제 sites.d
 
 - `enabled`: 자동 로그인 사용 여부. 사이트 추가/수정 때 `autoLogin: { enabled: true/false }`로 정함. 안 보내면 기존 값 유지(처음엔 `false`). `false`로 끄면 로그인 상태도 같이 해제됨
 - `loggedIn`: 현재 로그인 상태. `POST /sites/:id/login`, `/logout`으로만 바뀜. `enabled`가 `false`인 사이트에는 400
+
+오류 응답 (모두 `{ "error": "메시지" }` 형식):
+
+| 코드 | 언제 |
+|---|---|
+| 400 | 입력값이 잘못됨(위 규칙), 요청 본문이 올바른 JSON이 아님, 자동 로그인이 꺼진 사이트에 login/logout |
+| 404 | 없는 사이트 id |
+| 409 | 이미 등록된 URL (`sites.url`이 UNIQUE). 수정할 때도 같고, 이때 다른 값도 바뀌지 않음 |
+| 413 | 요청 본문이 너무 큼 |
+| 503 | DB가 바쁨(`SQLITE_BUSY`/`SQLITE_LOCKED`). 잠시 후 다시 시도 |
+| 500 | 그 외 서버 오류. 원인은 서버 콘솔에 `[server] 처리 중 오류`로 찍힘 |
+
+사이트 추가/수정은 사이트 저장과 `autoLogin` 저장을 하나의 트랜잭션으로 묶어서, 중간에 실패하면 둘 다 취소됩니다(반쯤 저장되지 않음).
 
 `/heartbeats` 응답 (사이트마다 최근 `limit`개, 오래된 것부터, `limit` 최대 1000):
 
