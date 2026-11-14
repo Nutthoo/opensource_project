@@ -1,5 +1,8 @@
 const express = require('express');
-const { getAllSites, getSiteById, addSite, updateSite, deleteSite, visitSite, getStaleSites, getRecentStatus } = require('./db');
+const {
+  getAllSites, getSiteById, addSite, updateSite, deleteSite, visitSite, getStaleSites,
+  setAutoLogin, loginSite, logoutSite, getRecentStatus
+} = require('./db');
 const monitor = require('./monitor');
 const cleanup = require('./cleanup');
 
@@ -72,6 +75,9 @@ app.post('/sites', (req, res) => {
   try {
     const result = addSite(fields.name, fields.url, fields.type, fields.port);
     const id = Number(result.lastInsertRowid);
+    if (req.body.autoLogin?.enabled === true) {
+      setAutoLogin(id, true);
+    }
     res.status(201).json(getSiteById(id));
     monitor.checkNow({ id, url: fields.url, type: fields.type, port: fields.port });
   } catch (err) {
@@ -95,6 +101,9 @@ app.put('/sites/:id', (req, res) => {
   try {
     updateSite(req.params.id, fields.name, fields.url, fields.type, fields.port);
     const id = Number(req.params.id);
+    if (typeof req.body.autoLogin?.enabled === 'boolean') {
+      setAutoLogin(id, req.body.autoLogin.enabled);
+    }
     res.json(getSiteById(id));
     // 주소가 바뀌었을 수 있으니 이전 응답 시간 추정값은 버리고 바로 다시 검사
     monitor.forget(id);
@@ -124,6 +133,23 @@ app.post('/sites/:id/visit', (req, res) => {
   }
   res.json(getSiteById(req.params.id));
 });
+
+function loginRoute(action) {
+  return (req, res) => {
+    const site = getSiteById(req.params.id);
+    if (!site) {
+      return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
+    }
+    if (!site.autoLogin.enabled) {
+      return res.status(400).json({ error: '자동 로그인이 켜져 있지 않은 사이트입니다' });
+    }
+    action(site.id);
+    res.json(getSiteById(site.id));
+  };
+}
+
+app.post('/sites/:id/login', loginRoute(loginSite));
+app.post('/sites/:id/logout', loginRoute(logoutSite));
 
 // 5. 서버 상태 기록 (C++ 엔진이 저장한 site_status)
 // 응답: { "1": [{ site_id, status, response_time, message, checked_at }, ...], ... }
