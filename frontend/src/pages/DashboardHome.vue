@@ -43,7 +43,7 @@
 
             <h2 class="mb-3">자주 가는 사이트</h2>
             <div v-if="store.loading" class="text-secondary mb-3">불러오는 중…</div>
-            <MonitorList v-else @add="showAdd = true" @delete="onDelete" @error="showToast" />
+            <MonitorList v-else @add="openDialog(null)" @edit="openDialog" @cleanup="showCleanup = true" @delete="onDelete" @error="showToast" />
 
             <h2 class="mb-3 mt-4">최근 상태 변화</h2>
             <div class="shadow-box table-wrapper">
@@ -70,7 +70,8 @@
                 </table>
             </div>
 
-            <AddSiteDialog v-model="showAdd" />
+            <SiteDialog v-model="showDialog" :site="editingSite" />
+            <CleanupDialog v-model="showCleanup" @deleted="(n) => n && showToast(`미방문 사이트 ${n}개를 삭제했습니다.`)" />
         </div>
     </transition>
 </template>
@@ -79,14 +80,15 @@
 import dayjs from "dayjs";
 import Status from "../components/Status.vue";
 import MonitorList from "../components/MonitorList.vue";
-import AddSiteDialog from "../components/AddSiteDialog.vue";
+import SiteDialog from "../components/SiteDialog.vue";
+import CleanupDialog from "../components/CleanupDialog.vue";
 import { store, stats, importantEvents, removeSite } from "../stores/monitorStore.js";
 
 export default {
-    components: { Status, MonitorList, AddSiteDialog },
+    components: { Status, MonitorList, SiteDialog, CleanupDialog },
 
     data() {
-        return { showAdd: false, toast: null };
+        return { showDialog: false, editingSite: null, showCleanup: false, toast: null };
     },
 
     computed: {
@@ -103,6 +105,12 @@ export default {
         showToast(msg) {
             this.toast = msg;
             setTimeout(() => (this.toast = null), 4000);
+        },
+
+        // site 가 null 이면 추가, 있으면 수정
+        openDialog(site) {
+            this.editingSite = site;
+            this.showDialog = true;
         },
 
         async onDelete(site) {

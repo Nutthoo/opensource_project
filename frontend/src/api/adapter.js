@@ -38,22 +38,35 @@ export function toStatus(s) {
     return STATUS_WORDS[key] ?? -1;
 }
 
-// POST/PUT 응답은 {id, name, url} 만 오므로 나머지는 prev 로 채움
+// 확인 방식: http | ping | tcp (예전 값 "port" 는 tcp 로 취급)
+export function toType(t) {
+    if (t === "port") return "tcp";
+    return t === "tcp" || t === "ping" ? t : "http";
+}
+
+// 사이트 1건. 단건 응답(POST/PUT/visit/login)에는 uptime_24 가 없어서 prev 값으로 채움
 export function toSite(raw, prev = {}) {
     const visit = pick(raw, "visitCount", "visit_count");
     const active = pick(raw, "active");
+    // http/ping 은 port 가 null 로 오므로 pick 대신 키 존재 여부로 판단
+    const port = "port" in raw ? (raw.port == null ? null : Number(raw.port)) : (prev.port ?? null);
 
     return {
         id: Number(raw.id ?? prev.id),
         name: raw.name ?? prev.name ?? "",
         url: raw.url ?? prev.url ?? "",
-        type: raw.type ?? prev.type ?? "http",
+        type: toType(raw.type ?? prev.type),
+        port,
+        // 백엔드가 아직 확인 주기를 저장하지 않아서 응답에 없으면 60초
         interval: raw.interval ?? prev.interval ?? 60,
         active: active !== undefined ? Boolean(active) : (prev.active ?? true),
         visitCount: visit !== undefined ? Number(visit) : (prev.visitCount ?? 0),
         lastVisitedAt: toISO(pick(raw, "lastVisitedAt", "last_visited_at")) ?? prev.lastVisitedAt ?? null,
-        // TODO: 자동로그인 컬럼 정해지면 수정
-        autoLogin: raw.autoLogin ?? prev.autoLogin ?? { enabled: false, loggedIn: false },
+        createdAt: toISO(pick(raw, "createdAt", "created_at")) ?? prev.createdAt ?? null,
+        autoLogin: {
+            enabled: Boolean(raw.autoLogin?.enabled ?? prev.autoLogin?.enabled ?? false),
+            loggedIn: Boolean(raw.autoLogin?.loggedIn ?? prev.autoLogin?.loggedIn ?? false),
+        },
         uptime24: pick(raw, "uptime24", "uptime_24") ?? prev.uptime24 ?? null,
     };
 }

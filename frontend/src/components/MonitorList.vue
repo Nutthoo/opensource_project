@@ -14,6 +14,7 @@
                 placeholder="사이트 이름 또는 주소 검색"
                 autocomplete="off"
             />
+            <button class="btn btn-outline-secondary text-nowrap ms-auto" @click="$emit('cleanup')">미방문 정리</button>
             <button class="btn btn-primary text-nowrap" @click="$emit('add')">+ 사이트 추가</button>
         </div>
 
@@ -27,6 +28,7 @@
                 :key="item.id"
                 :monitor="item"
                 :rank="index + 1"
+                @edit="$emit('edit', $event)"
                 @delete="$emit('delete', $event)"
                 @error="$emit('error', $event)"
             />
@@ -41,7 +43,7 @@ import { sortedSites } from "../stores/monitorStore.js";
 export default {
     components: { MonitorListItem },
 
-    emits: ["add", "delete", "error"],
+    emits: ["add", "edit", "delete", "cleanup", "error"],
 
     data() {
         return { searchText: "" };

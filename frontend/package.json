@@ -10,9 +10,12 @@
   },
   "dependencies": {
     "bootstrap": "^5.3.3",
+    "chart.js": "^4.2.1",
+    "chartjs-adapter-dayjs-4": "^1.0.4",
     "dayjs": "^1.11.13",
     "socket.io-client": "^4.8.1",
     "vue": "^3.5.13",
+    "vue-chartjs": "^5.2.0",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {

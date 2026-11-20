@@ -24,14 +24,25 @@ async function request(method, path, body) {
     }
 
     if (!res.ok) {
-        const err = new Error(data?.error || data?.msg || `${res.status} ${res.statusText}`);
+        const err = new Error(data?.error || `${res.status} ${res.statusText}`);
         err.status = res.status;
-        // HTML 404 = 라우트 없음
-        err.notImplemented = res.status === 404 && data === null;
         throw err;
     }
 
     return data;
+}
+
+// 백엔드로 보내는 사이트 필드 (name, url 필수 / type: http|ping|tcp / tcp 는 port 필수)
+// interval 은 백엔드가 아직 저장하지 않지만 나중을 위해 같이 보냄
+function toBody(site) {
+    return {
+        name: site.name,
+        url: site.url,
+        type: site.type,
+        port: site.type === "tcp" ? site.port : undefined,
+        interval: site.interval,
+        autoLogin: { enabled: Boolean(site.autoLogin?.enabled) },
+    };
 }
 
 // sites
@@ -41,37 +52,37 @@ export async function getSites() {
 }
 
 export async function createSite(site) {
-    const raw = USE_MOCK ? await mock.createSite(site) : await request("POST", "/sites", site);
+    const raw = USE_MOCK ? await mock.createSite(toBody(site)) : await request("POST", "/sites", toBody(site));
     return toSite(raw);
 }
 
-export async function updateSite(id, site) {
-    const raw = USE_MOCK
-        ? await mock.updateSite(id, site)
-        : await request("PUT", `/sites/${id}`, { name: site.name, url: site.url });
-    return toSite(raw, site);
+// PUT 은 name, url 이 필수라서 항상 전체 필드를 보냄. 응답에 없는 값(uptime 등)은 prev 로 유지
+export async function updateSite(id, site, prev) {
+    const raw = USE_MOCK ? await mock.updateSite(id, toBody(site)) : await request("PUT", `/sites/${id}`, toBody(site));
+    return toSite(raw, prev);
 }
 
 export const deleteSite = (id) => (USE_MOCK ? mock.deleteSite(id) : request("DELETE", `/sites/${id}`));
 
-// visit (TODO: backend)
+// days 일 넘게 방문하지 않은 사이트 (한 번도 방문 안 했으면 등록일 기준), 오래된 순
+export async function getUnvisitedSites(days) {
+    const list = USE_MOCK ? await mock.getUnvisitedSites(days) : await request("GET", `/sites/unvisited?days=${days}`);
+    return list.map((raw) => toSite(raw));
+}
+
+// 방문 기록 (visit_count + 1, last_visited_at 갱신)
 export async function visitSite(id, prev) {
     const raw = USE_MOCK ? await mock.visitSite(id) : await request("POST", `/sites/${id}/visit`);
     return toSite(raw, prev);
 }
 
-// heartbeats (TODO: backend)
+// 사이트별 최근 상태 기록 (site_status)
 export async function getHeartbeats(limit = 100) {
-    try {
-        const data = USE_MOCK ? await mock.getHeartbeats(limit) : await request("GET", `/heartbeats?limit=${limit}`);
-        return toHeartbeatMap(data);
-    } catch (e) {
-        if (e.notImplemented) return {};
-        throw e;
-    }
+    const data = USE_MOCK ? await mock.getHeartbeats(limit) : await request("GET", `/heartbeats?limit=${limit}`);
+    return toHeartbeatMap(data);
 }
 
-// auto login / logout (TODO: backend)
+// 원격 로그인 / 로그아웃 (자동 로그인이 켜진 사이트만)
 export async function remoteLogin(id, prev) {
     const raw = USE_MOCK ? await mock.remoteLogin(id) : await request("POST", `/sites/${id}/login`);
     return toSite(raw, prev);

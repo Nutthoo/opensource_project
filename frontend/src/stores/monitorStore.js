@@ -5,7 +5,8 @@ import { toBeat, toSite } from "../api/adapter.js";
 import { DOWN, UP, PENDING, MAINTENANCE } from "../util.js";
 
 const MAX_BEATS = 100;
-const POLL_MS = 30000;
+// 백엔드가 60초마다 상태를 검사하므로 화면도 60초마다 사이트 목록(가동률·로그인 상태)과 상태 기록을 다시 받음
+const POLL_MS = 60000;
 
 export const store = reactive({
     useMock: api.USE_MOCK,
@@ -19,13 +20,27 @@ export const store = reactive({
 let socket = null;
 let unsubscribeMock = null;
 let pollTimer = null;
-let warnedVisit = false;
 
 function pushBeat(raw) {
     const beat = toBeat(raw);
     const list = (store.heartbeats[beat.siteId] ||= []);
     list.push(beat);
     if (list.length > MAX_BEATS) list.splice(0, list.length - MAX_BEATS);
+}
+
+async function loadSites() {
+    try {
+        const sites = await api.getSites();
+        store.sites = Object.fromEntries(sites.map((s) => [s.id, s]));
+        store.connected = true;
+        store.error = null;
+    } catch (e) {
+        // 목록은 지우지 않고 그대로 두고, 연결 끊김만 표시
+        store.connected = false;
+        store.error = "사이트 목록을 불러오지 못했습니다: " + e.message;
+    } finally {
+        store.loading = false;
+    }
 }
 
 async function loadHeartbeats() {
@@ -37,18 +52,8 @@ async function loadHeartbeats() {
 }
 
 export async function refresh() {
-    try {
-        const sites = await api.getSites();
-        store.sites = Object.fromEntries(sites.map((s) => [s.id, s]));
-        store.connected = true;
-        store.error = null;
-    } catch (e) {
-        store.connected = false;
-        store.error = "사이트 목록을 불러오지 못했습니다: " + e.message;
-    } finally {
-        store.loading = false;
-    }
-    await loadHeartbeats();
+    await loadSites();
+    if (store.connected) await loadHeartbeats();
 }
 
 export async function init() {
@@ -56,12 +61,12 @@ export async function init() {
 
     if (api.USE_MOCK) {
         unsubscribeMock = api.subscribeMock(pushBeat);
+        pollTimer = setInterval(loadSites, POLL_MS);
         return;
     }
 
     if (!api.USE_SOCKET) {
-        // 소켓 미사용 시 polling
-        pollTimer = setInterval(loadHeartbeats, POLL_MS);
+        pollTimer = setInterval(refresh, POLL_MS);
         return;
     }
 
@@ -72,6 +77,8 @@ export async function init() {
         delete store.sites[id];
         delete store.heartbeats[id];
     });
+    // 가동률은 socket 이벤트로 오지 않으므로 목록은 계속 주기적으로 받음
+    pollTimer = setInterval(loadSites, POLL_MS);
 }
 
 export function dispose() {
@@ -130,8 +137,10 @@ export async function addSite(data) {
 }
 
 export async function editSite(id, data) {
-    // PUT /sites/:id 는 name, url 둘 다 필요
-    store.sites[id] = await api.updateSite(id, { ...store.sites[id], ...data });
+    const prev = store.sites[id];
+    const site = await api.updateSite(id, { ...prev, ...data }, prev);
+    store.sites[id] = site;
+    return site;
 }
 
 export async function removeSite(id) {
@@ -140,30 +149,21 @@ export async function removeSite(id) {
     delete store.heartbeats[id];
 }
 
-export async function visit(site) {
-    window.open(site.url, "_blank", "noopener");
-    try {
-        store.sites[site.id] = await api.visitSite(site.id, site);
-    } catch (e) {
-        if (!e.notImplemented) throw e;
+// 미방문 사이트 정리 화면용 후보 목록
+export const getUnvisitedSites = (days) => api.getUnvisitedSites(days);
 
-        // TODO: 백엔드 visit API 생기면 제거
-        const s = store.sites[site.id];
-        s.visitCount++;
-        s.lastVisitedAt = new Date().toISOString();
-        if (!warnedVisit) {
-            warnedVisit = true;
-            throw new Error("백엔드에 방문 기록 기능이 아직 없어서, 방문 횟수는 화면에만 반영돼요. (새로고침하면 사라짐)");
-        }
-    }
+// http 사이트만 새 탭으로 열 수 있음 (ping/tcp 는 주소가 웹페이지가 아님)
+export function canOpen(site) {
+    return site.type === "http";
+}
+
+export async function visit(site) {
+    if (!canOpen(site)) return;
+    window.open(site.url, "_blank", "noopener");
+    store.sites[site.id] = await api.visitSite(site.id, site);
 }
 
 export async function toggleLogin(site) {
     const fn = site.autoLogin.loggedIn ? api.remoteLogout : api.remoteLogin;
-    try {
-        store.sites[site.id] = await fn(site.id, site);
-    } catch (e) {
-        if (e.notImplemented) throw new Error("백엔드에 자동로그인 기능이 아직 없어요.");
-        throw e;
-    }
+    store.sites[site.id] = await fn(site.id, site);
 }

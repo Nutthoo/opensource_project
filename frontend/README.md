@@ -36,7 +36,9 @@ src/
 │  ├─ HeartbeatBar.vue
 │  ├─ MonitorList.vue
 │  ├─ MonitorListItem.vue
-│  └─ AddSiteDialog.vue
+│  ├─ PingChart.vue      응답 속도 그래프 (목록에서 📈 버튼으로 펼침)
+│  ├─ SiteDialog.vue     사이트 추가/수정 창
+│  └─ CleanupDialog.vue  미방문 사이트 정리 창
 ├─ pages/
 │  └─ DashboardHome.vue
 └─ assets/
@@ -44,23 +46,26 @@ src/
 
 ## 백엔드 API
 
-`backend` 브랜치 `server.js` 기준. 프론트는 `/api/...`로 호출하고 Vite proxy가 `/api`를 떼서 `localhost:3000`으로 전달함.
+`main` 브랜치 `backend/server.js` 기준 (자세한 내용은 `backend/README.md`). 프론트는 `/api/...`로 호출하고 Vite proxy가 `/api`를 떼서 `localhost:3000`으로 전달함.
 
-| 메서드 | 경로 | 상태 |
+| 메서드 | 경로 | 프론트에서 쓰는 곳 |
 |---|---|---|
-| GET | `/sites` | 구현됨 |
-| POST | `/sites` | 구현됨 |
-| PUT | `/sites/:id` | 구현됨 |
-| DELETE | `/sites/:id` | 구현됨 |
-| POST | `/sites/:id/visit` | 필요 (`visit_count + 1`, `last_visited_at` 갱신 후 사이트 반환) |
-| GET | `/heartbeats?limit=100` | 필요 (`site_status` 행 배열) |
-| POST | `/sites/:id/login` | 필요 |
-| POST | `/sites/:id/logout` | 필요 |
+| GET | `/sites` | 사이트 목록 (처음 + 60초마다) |
+| POST | `/sites` | 사이트 추가 |
+| PUT | `/sites/:id` | 사이트 수정 (name, url, type, port, autoLogin 전체 전송) |
+| DELETE | `/sites/:id` | 사이트 삭제 |
+| POST | `/sites/:id/visit` | 사이트 클릭 시 방문 기록 (http 사이트만) |
+| POST | `/sites/:id/login` | 원격 로그인 (자동 로그인이 켜진 사이트만) |
+| POST | `/sites/:id/logout` | 원격 로그아웃 |
+| GET | `/heartbeats?limit=100` | 상태바·최근 상태 변화 (처음 + 60초마다) |
+| GET | `/sites/unvisited?days=30` | 미방문 사이트 정리 창 (골라서 `DELETE /sites/:id`) |
 
-- 사이트 응답은 `sites` 테이블 컬럼 그대로 사용 (`visit_count`, `last_visited_at` 등)
+- 사이트 응답은 `sites` 테이블 컬럼 + `uptime_24`(0~1, 목록 조회에만 있음) + `autoLogin: { enabled, loggedIn }`
+- 확인 방식 `type`: `http` / `ping` / `tcp`. TCP는 주소를 `tcp://호스트:포트`로 저장하고 `port`도 함께 보냄
+- 확인 주기 `interval`은 백엔드가 아직 저장하지 않음 (모든 사이트 60초, `MONITOR_INTERVAL_SEC`)
 - 에러 응답은 `{ "error": "..." }`
-- `site_status.status`: `0/DOWN`, `1/UP`, `2/PENDING`, `3/MAINTENANCE` (숫자, 문자 모두 가능)
-- Socket.IO 사용 시 `heartbeat` 이벤트로 `site_status` 한 행 전송
+- `site_status.status`: `"up"` / `"down"` (프론트는 `0/DOWN`, `1/UP`, `2/PENDING`, `3/MAINTENANCE` 숫자로 변환)
+- Socket.IO는 백엔드에 아직 없음. 사용 시 `heartbeat` 이벤트로 `site_status` 한 행 전송
 
 ## 출처
 
@@ -74,6 +79,7 @@ src/
 | `src/components/Status.vue` | `src/components/Status.vue` |
 | `src/components/Uptime.vue` | `src/components/Uptime.vue` |
 | `src/components/HeartbeatBar.vue` | `src/components/HeartbeatBar.vue` (1.23.X) |
+| `src/components/PingChart.vue` | `src/components/PingChart.vue` (1.23.X) |
 | `src/components/MonitorList.vue` | `src/components/MonitorList.vue` |
 | `src/components/MonitorListItem.vue` | `src/components/MonitorListItem.vue` |
 | `src/pages/DashboardHome.vue` | `src/pages/DashboardHome.vue` |
