@@ -27,10 +27,14 @@ function parseUrl(url) {
   }
 }
 
-function portFromUrl(url) {
+function explicitPortFromUrl(url) {
+  const parsed = parseUrl(url);
+  return parsed && parsed.port ? Number(parsed.port) : null;
+}
+
+function defaultPortFromUrl(url) {
   const parsed = parseUrl(url);
   if (!parsed) return null;
-  if (parsed.port) return Number(parsed.port);
   if (parsed.protocol === 'https:') return 443;
   if (parsed.protocol === 'http:') return 80;
   return null;
@@ -64,7 +68,7 @@ function readSiteFields(body, current = {}) {
 
   let port = null;
   if (type === 'tcp') {
-    port = Number(body.port ?? portFromUrl(url) ?? current.port);
+    port = Number(body.port ?? explicitPortFromUrl(url) ?? current.port ?? defaultPortFromUrl(url));
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       return { error: 'tcp 방식은 1~65535 사이의 port가 필요합니다 (주소에 :포트를 붙이거나 port 값을 보내주세요)' };
     }
