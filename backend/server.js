@@ -1,15 +1,31 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const {
-  getAllSites, getSiteById, addSite, updateSite, deleteSite, visitSite, getStaleSites,
+  getAllSites, getSiteById, getSiteCredentials, addSite, updateSite, deleteSite, visitSite, getStaleSites,
   loginSite, logoutSite, getRecentStatus
 } = require('./db');
 const monitor = require('./monitor');
 const cleanup = require('./cleanup');
+const { performAutoLogin, closeAutoLogin } = require('./autologin');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
+
+// 프론트엔드 빌드본이 /api/... 로 요청하는 경로를 기존 라우트(/sites, /heartbeats 등)로 연결
+app.use((req, res, next) => {
+  if (req.url === '/api' || req.url.startsWith('/api/')) {
+    req.url = req.url.replace(/^\/api/, '') || '/';
+  }
+  next();
+});
+
+const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+}
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -74,15 +90,31 @@ function readSiteFields(body, current = {}) {
     }
   }
 
-  const autoLogin = typeof body.autoLogin?.enabled === 'boolean' ? body.autoLogin.enabled : undefined;
+  const rawInterval = body.interval ?? current.interval ?? 60;
+  const interval = Number(rawInterval);
+  if (!Number.isInteger(interval) || interval < 5 || interval > 86400) {
+    return { error: 'interval(확인 주기)은 5~86400 사이의 정수(초)여야 합니다' };
+  }
 
-  return { name, url, type, port, autoLogin };
+  let autoLogin = undefined;
+  if (body.autoLogin && typeof body.autoLogin.enabled === 'boolean') {
+    autoLogin = {
+      enabled: type === 'http' && body.autoLogin.enabled,
+      loginUrl: typeof body.autoLogin.loginUrl === 'string' ? body.autoLogin.loginUrl.trim() : '',
+      username: typeof body.autoLogin.username === 'string' ? body.autoLogin.username.trim() : '',
+      password: typeof body.autoLogin.password === 'string' ? body.autoLogin.password : '',
+      userSelector: typeof body.autoLogin.userSelector === 'string' ? body.autoLogin.userSelector.trim() : '',
+      passSelector: typeof body.autoLogin.passSelector === 'string' ? body.autoLogin.passSelector.trim() : '',
+      submitSelector: typeof body.autoLogin.submitSelector === 'string' ? body.autoLogin.submitSelector.trim() : '',
+    };
+  }
+
+  return { name, url, type, port, interval, autoLogin };
 }
 
 // 1. 사이트 목록 조회
 app.get('/sites', (req, res) => {
-  const sites = getAllSites();
-  res.json(sites);
+  res.json(getAllSites());
 });
 
 app.get('/sites/unvisited', (req, res) => {
@@ -99,9 +131,10 @@ app.post('/sites', (req, res) => {
   if (fields.error) {
     return res.status(400).json({ error: fields.error });
   }
-  const result = addSite(fields.name, fields.url, fields.type, fields.port, fields.autoLogin === true);
+  const result = addSite(fields.name, fields.url, fields.type, fields.port, fields.interval, fields.autoLogin || false);
   const id = Number(result.lastInsertRowid);
-  res.status(201).json(getSiteById(id));
+  const created = getSiteById(id);
+  res.status(201).json(created);
   monitor.checkNow({ id, url: fields.url, type: fields.type, port: fields.port });
 });
 
@@ -115,23 +148,26 @@ app.put('/sites/:id', (req, res) => {
   if (fields.error) {
     return res.status(400).json({ error: fields.error });
   }
-  const result = updateSite(current.id, fields.name, fields.url, fields.type, fields.port, fields.autoLogin);
+  const result = updateSite(current.id, fields.name, fields.url, fields.type, fields.port, fields.interval, fields.autoLogin);
   if (result.changes === 0) {
     return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
   }
+  if (fields.autoLogin && !fields.autoLogin.enabled) {
+    closeAutoLogin(current.id);
+  }
   res.json(getSiteById(current.id));
-  // 주소가 바뀌었을 수 있으니 이전 응답 시간 추정값은 버리고 바로 다시 검사
   monitor.forget(current.id);
   monitor.checkNow({ id: current.id, url: fields.url, type: fields.type, port: fields.port });
 });
 
 // 4. 사이트 삭제
-app.delete('/sites/:id', (req, res) => {
+app.delete('/sites/:id', async (req, res) => {
   const result = deleteSite(req.params.id);
   if (result.changes === 0) {
     return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
   }
   monitor.forget(req.params.id);
+  await closeAutoLogin(req.params.id);
   res.status(204).end();
 });
 
@@ -143,30 +179,51 @@ app.post('/sites/:id/visit', (req, res) => {
   res.json(getSiteById(req.params.id));
 });
 
-function loginRoute(action) {
-  return (req, res) => {
-    const site = getSiteById(req.params.id);
-    if (!site) {
-      return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
-    }
-    if (!site.autoLogin.enabled) {
-      return res.status(400).json({ error: '자동 로그인이 켜져 있지 않은 사이트입니다' });
-    }
-    action(site.id);
+// 실제 웹페이지에 접속해 아이디/비밀번호를 자동 입력하는 로그인 라우트
+app.post('/sites/:id/login', async (req, res) => {
+  const site = getSiteById(req.params.id);
+  if (!site) {
+    return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
+  }
+  if (!site.autoLogin.enabled) {
+    return res.status(400).json({ error: '자동 로그인이 켜져 있지 않은 사이트입니다' });
+  }
+
+  const credentials = getSiteCredentials(site.id);
+  try {
+    await performAutoLogin(site, credentials);
+    loginSite(site.id);
     res.json(getSiteById(site.id));
-  };
-}
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
-app.post('/sites/:id/login', loginRoute(loginSite));
-app.post('/sites/:id/logout', loginRoute(logoutSite));
+app.post('/sites/:id/logout', async (req, res) => {
+  const site = getSiteById(req.params.id);
+  if (!site) {
+    return res.status(404).json({ error: '사이트를 찾을 수 없습니다' });
+  }
+  if (!site.autoLogin.enabled) {
+    return res.status(400).json({ error: '자동 로그인이 켜져 있지 않은 사이트입니다' });
+  }
+  await closeAutoLogin(site.id);
+  logoutSite(site.id);
+  res.json(getSiteById(site.id));
+});
 
-// 5. 서버 상태 기록 (C++ 엔진이 저장한 site_status)
-// 응답: { "1": [{ site_id, status, response_time, message, checked_at }, ...], ... }
-// 사이트마다 최근 limit 개, 오래된 것부터. 프론트 adapter.js 의 toHeartbeatMap() 형식
+// 5. 서버 상태 기록
 app.get('/heartbeats', (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 1000);
   res.json(getRecentStatus(limit));
 });
+
+if (fs.existsSync(frontendDist)) {
+  app.get('*', (req, res, next) => {
+    if (req.method !== 'GET') return next();
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 app.use((err, req, res, next) => {
   if (res.headersSent) {

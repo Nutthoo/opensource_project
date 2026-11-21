@@ -6,7 +6,7 @@ import { DOWN, UP, PENDING, MAINTENANCE } from "../util.js";
 
 const MAX_BEATS = 100;
 // 백엔드가 60초마다 상태를 검사하므로 화면도 60초마다 사이트 목록(가동률·로그인 상태)과 상태 기록을 다시 받음
-const POLL_MS = 60000;
+const POLL_MS = 5000;
 
 export const store = reactive({
     useMock: api.USE_MOCK,

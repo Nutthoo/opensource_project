@@ -33,7 +33,6 @@ async function request(method, path, body) {
 }
 
 // 백엔드로 보내는 사이트 필드 (name, url 필수 / type: http|ping|tcp / tcp 는 port 필수)
-// interval 은 백엔드가 아직 저장하지 않지만 나중을 위해 같이 보냄
 function toBody(site) {
     return {
         name: site.name,
@@ -41,7 +40,17 @@ function toBody(site) {
         type: site.type,
         port: site.type === "tcp" ? site.port : undefined,
         interval: site.interval,
-        autoLogin: { enabled: Boolean(site.autoLogin?.enabled) },
+        autoLogin: site.autoLogin
+            ? {
+                  enabled: Boolean(site.autoLogin.enabled),
+                  loginUrl: site.autoLogin.loginUrl || "",
+                  username: site.autoLogin.username || "",
+                  password: site.autoLogin.password || "",
+                  userSelector: site.autoLogin.userSelector || "",
+                  passSelector: site.autoLogin.passSelector || "",
+                  submitSelector: site.autoLogin.submitSelector || "",
+              }
+            : { enabled: false },
     };
 }
 

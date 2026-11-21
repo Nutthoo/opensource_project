@@ -57,7 +57,6 @@ export function toSite(raw, prev = {}) {
         url: raw.url ?? prev.url ?? "",
         type: toType(raw.type ?? prev.type),
         port,
-        // 백엔드가 아직 확인 주기를 저장하지 않아서 응답에 없으면 60초
         interval: raw.interval ?? prev.interval ?? 60,
         active: active !== undefined ? Boolean(active) : (prev.active ?? true),
         visitCount: visit !== undefined ? Number(visit) : (prev.visitCount ?? 0),
@@ -66,6 +65,12 @@ export function toSite(raw, prev = {}) {
         autoLogin: {
             enabled: Boolean(raw.autoLogin?.enabled ?? prev.autoLogin?.enabled ?? false),
             loggedIn: Boolean(raw.autoLogin?.loggedIn ?? prev.autoLogin?.loggedIn ?? false),
+            hasCredentials: Boolean(raw.autoLogin?.hasCredentials ?? prev.autoLogin?.hasCredentials ?? false),
+            username: raw.autoLogin?.username ?? prev.autoLogin?.username ?? "",
+            loginUrl: raw.autoLogin?.loginUrl ?? prev.autoLogin?.loginUrl ?? "",
+            userSelector: raw.autoLogin?.userSelector ?? prev.autoLogin?.userSelector ?? "",
+            passSelector: raw.autoLogin?.passSelector ?? prev.autoLogin?.passSelector ?? "",
+            submitSelector: raw.autoLogin?.submitSelector ?? prev.autoLogin?.submitSelector ?? "",
         },
         uptime24: pick(raw, "uptime24", "uptime_24") ?? prev.uptime24 ?? null,
     };
