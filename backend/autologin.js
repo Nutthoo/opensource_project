@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const os = require('os');
+const path = require('path');
 const { chromium } = require('playwright-core');
 
 const SECRET_KEY = crypto
@@ -104,14 +106,33 @@ async function performAutoLogin(site, credentials) {
   await closeAutoLogin(site.id);
 
   const browser = await launchBrowser();
-  const context = await browser.newContext({ viewport: null });
+  const context = await browser.newContext({ viewport: null, acceptDownloads: true });
   let page = await context.newPage();
 
   page.setDefaultTimeout(0);
   page.setDefaultNavigationTimeout(0);
 
-  browser.on('disconnected', () => {
+  let isClosed = false;
+  const handleClose = () => {
+    isClosed = true;
     activeBrowsers.delete(site.id);
+    const { logoutSite } = require('./db');
+    logoutSite(site.id);
+  };
+
+  const handleDownload = async (download) => {
+    try {
+      const downloadsDir = path.join(os.homedir(), 'Downloads');
+      const savePath = path.join(downloadsDir, download.suggestedFilename());
+      await download.saveAs(savePath);
+    } catch {}
+  };
+
+  browser.on('disconnected', handleClose);
+  page.on('close', handleClose);
+  page.on('download', handleDownload);
+  context.on('page', (newPage) => {
+    newPage.on('download', handleDownload);
   });
   activeBrowsers.set(site.id, browser);
 
@@ -155,7 +176,7 @@ async function performAutoLogin(site, credentials) {
       await page.waitForTimeout(500);
     }
 
-    if (!browser.isConnected()) {
+    if (!browser.isConnected() || isClosed) {
       return { success: false, error: '사용자가 브라우저 창을 닫았습니다.' };
     }
 
@@ -185,9 +206,13 @@ async function performAutoLogin(site, credentials) {
       }
     }
 
+    if (isClosed || !browser.isConnected()) {
+      return { success: false, error: '사용자가 브라우저 창을 닫았습니다.' };
+    }
+
     return { success: true };
   } catch (err) {
-    if (!browser.isConnected()) {
+    if (!browser.isConnected() || isClosed) {
       return { success: false, error: '사용자가 브라우저 창을 닫았습니다.' };
     }
     throw new Error(`자동 로그인 처리 중 오류: ${err.message}`);
